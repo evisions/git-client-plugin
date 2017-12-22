@@ -953,6 +953,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 args.add("--format="+RAW);
                 if (n!=null)
                     args.add("-n").add(n);
+		args.add("-m");
                 for (String rev : this.revs)
                     args.add(rev);
 
