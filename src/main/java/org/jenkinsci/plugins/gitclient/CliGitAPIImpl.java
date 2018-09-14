@@ -973,7 +973,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 args.add("--format="+RAW);
                 if (n!=null)
                     args.add("-n").add(n);
-		args.add("-m");
+                args.add("-m"); // include merge commits
                 for (String rev : this.revs)
                     args.add(rev);
 
