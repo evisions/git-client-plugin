@@ -1,6 +1,4 @@
-
 package org.jenkinsci.plugins.gitclient;
-
 
 import com.cloudbees.jenkins.plugins.sshcredentials.SSHUserPrivateKey;
 import com.cloudbees.plugins.credentials.common.StandardCredentials;
@@ -25,8 +23,10 @@ import hudson.plugins.git.IndexEntry;
 import hudson.plugins.git.Revision;
 import hudson.util.ArgumentListBuilder;
 import hudson.util.Secret;
+import hudson.Proc;
 
 import org.apache.commons.io.FileUtils;
+import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
 import org.eclipse.jgit.lib.Constants;
 import org.eclipse.jgit.lib.ObjectId;
@@ -36,6 +36,7 @@ import org.eclipse.jgit.lib.RepositoryBuilder;
 import org.eclipse.jgit.transport.RefSpec;
 import org.eclipse.jgit.transport.RemoteConfig;
 import org.eclipse.jgit.transport.URIish;
+import org.jenkinsci.plugins.gitclient.cgit.GitCommandsExecutor;
 import org.kohsuke.stapler.framework.io.WriterOutputStream;
 
 import java.io.*;
@@ -64,6 +65,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 import java.util.regex.Matcher;
@@ -190,6 +192,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     private Map<String, StandardCredentials> credentials = new HashMap<>();
     private StandardCredentials defaultCredentials;
     private StandardCredentials lfsCredentials;
+    private final String encoding;
 
     /* git config --get-regex applies the regex to match keys, and returns all matches (including substring matches).
      * Thus, a config call:
@@ -292,14 +295,19 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @param listener a {@link hudson.model.TaskListener} object.
      * @param environment a {@link hudson.EnvVars} object.
      */
-    protected CliGitAPIImpl(String gitExe, File workspace,
-                         TaskListener listener, EnvVars environment) {
+    protected CliGitAPIImpl(String gitExe, File workspace, TaskListener listener, EnvVars environment) {
         super(workspace);
         this.listener = listener;
         this.gitExe = gitExe;
         this.environment = environment;
 
-        launcher = new LocalLauncher(IGitAPI.verbose?listener:TaskListener.NULL);
+        if( isZos() && System.getProperty("ibm.system.encoding") != null ) {
+            this.encoding = Charset.forName(System.getProperty("ibm.system.encoding")).toString();
+        } else {
+            this.encoding = Charset.defaultCharset().toString();
+        }
+
+        launcher = new LocalLauncher(IGitAPI.verbose ? listener : TaskListener.NULL);
     }
 
     /** {@inheritDoc} */
@@ -440,49 +448,57 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     public FetchCommand fetch_() {
         return new FetchCommand() {
-            public URIish url;
-            public List<RefSpec> refspecs;
-            public boolean prune;
-            public boolean shallow;
-            public Integer timeout;
-            public boolean tags = true;
-            public Integer depth = 1;
+            private URIish url;
+            private List<RefSpec> refspecs;
+            private boolean prune;
+            private boolean shallow;
+            private Integer timeout;
+            private boolean tags = true;
+            private Integer depth = 1;
 
+            @Override
             public FetchCommand from(URIish remote, List<RefSpec> refspecs) {
                 this.url = remote;
                 this.refspecs = refspecs;
                 return this;
             }
 
+            @Override
             public FetchCommand tags(boolean tags) {
                 this.tags = tags;
                 return this;
             }
 
+            @Override
             public FetchCommand prune() {
                 return prune(true);
             }
 
+            @Override
             public FetchCommand prune(boolean prune) {
                 this.prune = prune;
                 return this;
             }
 
+            @Override
             public FetchCommand shallow(boolean shallow) {
                 this.shallow = shallow;
                 return this;
             }
 
+            @Override
             public FetchCommand timeout(Integer timeout) {
             	this.timeout = timeout;
             	return this;
             }
 
+            @Override
             public FetchCommand depth(Integer depth) {
                 this.depth = depth;
                 return this;
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
                 listener.getLogger().println(
                         "Fetching upstream changes from " + url);
@@ -500,7 +516,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 if (prune) args.add("--prune");
 
                 if (shallow) {
-                    if (depth == null){
+                    if (depth == null) {
                         depth = 1;
                     }
                     args.add("--depth=" + depth);
@@ -616,25 +632,28 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     public CloneCommand clone_() {
         return new CloneCommand() {
-            String url;
-            String origin = "origin";
-            String reference;
-            boolean shallow,shared;
-            Integer timeout;
-            boolean tags = true;
-            List<RefSpec> refspecs;
-            Integer depth = 1;
+            private String url;
+            private String origin = "origin";
+            private String reference;
+            private boolean shallow,shared;
+            private Integer timeout;
+            private boolean tags = true;
+            private List<RefSpec> refspecs;
+            private Integer depth = 1;
 
+            @Override
             public CloneCommand url(String url) {
                 this.url = url;
                 return this;
             }
 
+            @Override
             public CloneCommand repositoryName(String name) {
                 this.origin = name;
                 return this;
             }
 
+            @Override
             public CloneCommand shared() {
                 return shared(true);
             }
@@ -645,6 +664,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 return this;
             }
 
+            @Override
             public CloneCommand shallow() {
                 return shallow(true);
             }
@@ -655,36 +675,43 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 return this;
             }
 
+            @Override
             public CloneCommand noCheckout() {
                 //this.noCheckout = true; Since the "clone" command has been replaced with init + fetch, the --no-checkout option is always satisfied
                 return this;
             }
 
+            @Override
             public CloneCommand tags(boolean tags) {
                 this.tags = tags;
                 return this;
             }
 
+            @Override
             public CloneCommand reference(String reference) {
                 this.reference = reference;
                 return this;
             }
 
+            @Override
             public CloneCommand timeout(Integer timeout) {
             	this.timeout = timeout;
             	return this;
             }
 
+            @Override
             public CloneCommand depth(Integer depth) {
                 this.depth = depth;
                 return this;
             }
 
+            @Override
             public CloneCommand refspecs(List<RefSpec> refspecs) {
                 this.refspecs = new ArrayList<>(refspecs);
                 return this;
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
 
                 URIish urIish = null;
@@ -721,9 +748,9 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 if (reference != null && !reference.isEmpty()) {
                     File referencePath = new File(reference);
                     if (!referencePath.exists())
-                        listener.error("Reference path does not exist: " + reference);
+                        listener.getLogger().println("[WARNING] Reference path does not exist: " + reference);
                     else if (!referencePath.isDirectory())
-                        listener.error("Reference path is not a directory: " + reference);
+                        listener.getLogger().println("[WARNING] Reference path is not a directory: " + reference);
                     else {
                         // reference path can either be a normal or a base repository
                         File objectsPath = new File(referencePath, ".git/objects");
@@ -732,7 +759,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                             objectsPath = new File(referencePath, "objects");
                         }
                         if (!objectsPath.isDirectory())
-                            listener.error("Reference path does not contain an objects directory (no git repo?): " + objectsPath);
+                            listener.getLogger().println("[WARNING] Reference path does not contain an objects directory (not a git repo?): " + objectsPath);
                         else {
                             File alternates = new File(workspace, ".git/objects/info/alternates");
                             try (PrintWriter w = new PrintWriter(alternates, Charset.defaultCharset().toString())) {
@@ -774,43 +801,50 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     public MergeCommand merge() {
         return new MergeCommand() {
-            public ObjectId rev;
-            public String comment;
-            public String strategy;
-            public String fastForwardMode;
-            public boolean squash;
-            public boolean commit = true;
+            private ObjectId rev;
+            private String comment;
+            private String strategy;
+            private String fastForwardMode;
+            private boolean squash;
+            private boolean commit = true;
 
+            @Override
             public MergeCommand setRevisionToMerge(ObjectId rev) {
                 this.rev = rev;
                 return this;
             }
 
+            @Override
             public MergeCommand setStrategy(MergeCommand.Strategy strategy) {
                 this.strategy = strategy.toString();
                 return this;
             }
 
+            @Override
             public MergeCommand setGitPluginFastForwardMode(MergeCommand.GitPluginFastForwardMode fastForwardMode) {
                 this.fastForwardMode = fastForwardMode.toString();
                 return this;
             }
 
+            @Override
             public MergeCommand setSquash(boolean squash) {
                 this.squash = squash;
                 return this;
             }
 
+            @Override
             public MergeCommand setMessage(String comment) {
                 this.comment = comment;
                 return this;
             }
 
+            @Override
             public MergeCommand setCommit(boolean commit) {
                 this.commit = commit;
                 return this;
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
                 ArgumentListBuilder args = new ArgumentListBuilder();
                 args.add("merge");
@@ -854,11 +888,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
         return new RebaseCommand() {
             private String upstream;
 
+            @Override
             public RebaseCommand setUpstream(String upstream) {
                 this.upstream = upstream;
                 return this;
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
                 try {
                     ArgumentListBuilder args = new ArgumentListBuilder();
@@ -881,19 +917,22 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     public InitCommand init_() {
         return new InitCommand() {
 
-            public String workspace;
-            public boolean bare;
+            private String workspace;
+            private boolean bare;
 
+            @Override
             public InitCommand workspace(String workspace) {
                 this.workspace = workspace;
                 return this;
             }
 
+            @Override
             public InitCommand bare(boolean bare) {
                 this.bare = bare;
                 return this;
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
                 /* Match JGit - create directory if it does not exist */
                 /* Multi-branch pipeline assumes init() creates directory */
@@ -925,12 +964,27 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * Remove untracked files and directories, including files listed
      * in the ignore rules.
      *
+     * @param cleanSubmodule flag to add extra -f
+     * @throws hudson.plugins.git.GitException if underlying git operation fails.
+     * @throws java.lang.InterruptedException if interrupted.
+     */
+    public void clean(boolean cleanSubmodule) throws GitException, InterruptedException {
+        reset(true);
+	String cmd = "-fdx";
+	if (cleanSubmodule) cmd = "-ffdx";
+
+	launchCommand("clean", cmd);
+    }
+
+    /**
+     * Remove untracked files and directories, including files listed
+     * in the ignore rules.
+     *
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
     public void clean() throws GitException, InterruptedException {
-        reset(true);
-        launchCommand("clean", "-fdx");
+        this.clean(false);
     }
 
     /** {@inheritDoc} */
@@ -1053,11 +1107,11 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
         return new ChangelogCommand() {
 
             /** Equivalent to the git-log raw format but using ISO 8601 date format - also prevent to depend on git CLI future changes */
-            public static final String RAW = "commit %H%ntree %T%nparent %P%nauthor %aN <%aE> %ai%ncommitter %cN <%cE> %ci%n%n%w(76,4,4)%s%n%n%b";
-            final List<String> revs = new ArrayList<>();
+            public static final String RAW = "commit %H%ntree %T%nparent %P%nauthor %aN <%aE> %ai%ncommitter %cN <%cE> %ci%n%n%w(0,4,4)%B";
+            private final List<String> revs = new ArrayList<>();
 
-            Integer n = null;
-            Writer out = null;
+            private Integer n = null;
+            private Writer out = null;
 
             @Override
             public ChangelogCommand excludes(String rev) {
@@ -1101,7 +1155,12 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
             @Override
             public void execute() throws GitException, InterruptedException {
                 ArgumentListBuilder args = new ArgumentListBuilder(gitExe, "whatchanged", "--no-abbrev", "-M");
-                args.add("--format="+RAW);
+                if (isAtLeastVersion(1, 8, 3, 0)) {
+                    args.add("--format="+RAW);
+                } else {
+                    /* Ancient git versions don't support the required format string, use 'raw' and hope it works */
+                    args.add("--format=raw");
+                }
                 if (n!=null)
                     args.add("-n").add(n);
                 args.add("-m"); // include merge commits
@@ -1181,40 +1240,67 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     public SubmoduleUpdateCommand submoduleUpdate() {
         return new SubmoduleUpdateCommand() {
-            boolean recursive                      = false;
-            boolean remoteTracking                 = false;
-            boolean parentCredentials              = false;
-            String  ref                            = null;
-            Map<String, String> submodBranch   = new HashMap<>();
-            public Integer timeout;
+            private boolean recursive                      = false;
+            private boolean remoteTracking                 = false;
+            private boolean parentCredentials              = false;
+            private boolean shallow                        = false;
+            private String  ref                            = null;
+            private Map<String, String> submodBranch   = new HashMap<>();
+            private Integer timeout;
+            private Integer depth = 1;
+            private int threads = 1;
 
+            @Override
             public SubmoduleUpdateCommand recursive(boolean recursive) {
                 this.recursive = recursive;
                 return this;
             }
 
+            @Override
             public SubmoduleUpdateCommand remoteTracking(boolean remoteTracking) {
                 this.remoteTracking = remoteTracking;
                 return this;
             }
 
+            @Override
             public SubmoduleUpdateCommand parentCredentials(boolean parentCredentials) {
                 this.parentCredentials = parentCredentials;
                 return this;
             }
 
+            @Override
             public SubmoduleUpdateCommand ref(String ref) {
                 this.ref = ref;
                 return this;
             }
 
+            @Override
             public SubmoduleUpdateCommand useBranch(String submodule, String branchname) {
                 this.submodBranch.put(submodule, branchname);
                 return this;
             }
 
+            @Override
             public SubmoduleUpdateCommand timeout(Integer timeout) {
                 this.timeout = timeout;
+                return this;
+            }
+
+            @Override
+            public SubmoduleUpdateCommand shallow(boolean shallow) {
+                this.shallow = shallow;
+                return this;
+            }
+
+            @Override
+            public SubmoduleUpdateCommand depth(Integer depth) {
+                this.depth = depth;
+                return this;
+            }
+
+            @Override
+            public SubmoduleUpdateCommand threads(int threads) {
+                this.threads = threads;
                 return this;
             }
 
@@ -1222,6 +1308,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
              * @throws GitException if executing the Git command fails
              * @throws InterruptedException if called methods throw same exception
              */
+            @Override
             public void execute() throws GitException, InterruptedException {
                 // Initialize the submodules to ensure that the git config
                 // contains the URLs from .gitmodules.
@@ -1242,13 +1329,22 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 if ((ref != null) && !ref.isEmpty()) {
                     File referencePath = new File(ref);
                     if (!referencePath.exists())
-                        listener.error("Reference path does not exist: " + ref);
+                        listener.getLogger().println("[WARNING] Reference path does not exist: " + ref);
                     else if (!referencePath.isDirectory())
-                        listener.error("Reference path is not a directory: " + ref);
+                        listener.getLogger().println("[WARNING] Reference path is not a directory: " + ref);
                     else
                         args.add("--reference", ref);
                 }
-
+                if (shallow) {
+                    if (depth == null) {
+                        depth = 1;
+                    }
+                    if (isAtLeastVersion(1, 8, 4, 0)) {
+                        args.add("--depth=" + depth);
+                    } else {
+                        listener.getLogger().println("[WARNING] Git client older than 1.8.4 doesn't support shallow submodule updates. This flag is ignored.");
+                    }
+                }
 
                 // We need to call submodule update for each configured
                 // submodule. Note that we can't reliably depend on the
@@ -1272,6 +1368,9 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 // path.
                 Pattern pattern = Pattern.compile(SUBMODULE_REMOTE_PATTERN_STRING, Pattern.MULTILINE);
                 Matcher matcher = pattern.matcher(cfgOutput);
+
+                List<Callable<String>> commands = new ArrayList<>();
+
                 while (matcher.find()) {
                     ArgumentListBuilder perModuleArgs = args.clone();
                     String sModuleName = matcher.group(1);
@@ -1305,8 +1404,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                     String sModulePath = getSubmodulePath(sModuleName);
 
                     perModuleArgs.add(sModulePath);
-                    launchCommandWithCredentials(perModuleArgs, workspace, cred, urIish, timeout);
+                    StandardCredentials finalCred = cred;
+                    URIish finalUrIish = urIish;
+
+                    commands.add(() -> launchCommandWithCredentials(perModuleArgs, workspace, finalCred, finalUrIish, timeout));
                 }
+
+                new GitCommandsExecutor(threads, listener).invokeAll(commands);
             }
         };
     }
@@ -1673,12 +1777,19 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * Package protected for testing.  Not to be used outside this class
      *
-     * @param prefix file name prefix for the generated temporary file
+     * @param prefix file name prefix for the generated temporary file (will be preceeded by "jenkins-gitclient-")
      * @param suffix file name suffix for the generated temporary file
      * @return temporary file
      * @throws IOException on error
      */
     File createTempFile(String prefix, String suffix) throws IOException {
+        String common_prefix = "jenkins-gitclient-";
+        if (prefix == null) {
+            prefix = common_prefix;
+        } else {
+            prefix = common_prefix + prefix;
+        }
+
         if (workspace == null) {
             return createTempFileInSystemDir(prefix, suffix);
         }
@@ -1702,6 +1813,9 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 return createTempFileInSystemDir(prefix, suffix);
             }
             return Files.createTempFile(tmpPath, prefix, suffix).toFile();
+        } else if (workspaceTmp.getAbsolutePath().contains("%")) {
+            /* Avoid Linux expansion of % in ssh arguments */
+            return createTempFileInSystemDir(prefix, suffix);
         }
         // Unix specific
         if (workspaceTmp.getAbsolutePath().contains("`")) {
@@ -1778,14 +1892,16 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
         File key = null;
         File ssh = null;
-        File pass = null;
         File askpass = null;
+        File usernameFile = null;
+        File passwordFile = null;
+        File passphrase = null;
         EnvVars env = environment;
         if (!PROMPT_FOR_AUTHENTICATION && isAtLeastVersion(2, 3, 0, 0)) {
             env = new EnvVars(env);
-            env.put("GIT_TERMINAL_PROMPT", "0"); // Don't prompt for auth from command line git
+            env.put("GIT_TERMINAL_PROMPT", "false"); // Don't prompt for auth from command line git
             if (isWindows()) {
-                env.put("GCM_INTERACTIVE", "never"); // Don't prompt for auth from git credentials manager for windows
+                env.put("GCM_INTERACTIVE", "false"); // Don't prompt for auth from git credentials manager for windows
             }
         }
         try {
@@ -1800,18 +1916,19 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 if (userName == null) {
                     userName = sshUser.getUsername();
                 }
+                passphrase = createPassphraseFile(sshUser);
                 if (launcher.isUnix()) {
                     ssh =  createUnixGitSSH(key, userName);
-                    pass =  createUnixSshAskpass(sshUser);
+                    askpass =  createUnixSshAskpass(sshUser, passphrase);
                 } else {
                     ssh = createWindowsGitSSH(key, userName);
-                    pass =  createWindowsSshAskpass(sshUser);
+                    askpass =  createWindowsSshAskpass(sshUser, passphrase);
                 }
 
                 env = new EnvVars(env);
                 env.put("GIT_SSH", ssh.getAbsolutePath());
                 env.put("GIT_SSH_VARIANT", "ssh");
-                env.put("SSH_ASKPASS", pass.getAbsolutePath());
+                env.put("SSH_ASKPASS", askpass.getAbsolutePath());
 
                 // supply a dummy value for DISPLAY if not already present
                 // or else ssh will not invoke SSH_ASKPASS
@@ -1823,10 +1940,12 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 StandardUsernamePasswordCredentials userPass = (StandardUsernamePasswordCredentials) credentials;
                 listener.getLogger().println("using GIT_ASKPASS to set credentials " + userPass.getDescription());
 
+                usernameFile = createUsernameFile(userPass);
+                passwordFile = createPasswordFile(userPass);
                 if (launcher.isUnix()) {
-                    askpass = createUnixStandardAskpass(userPass);
+                    askpass = createUnixStandardAskpass(userPass, usernameFile, passwordFile);
                 } else {
-                    askpass = createWindowsStandardAskpass(userPass);
+                    askpass = createWindowsStandardAskpass(userPass, usernameFile, passwordFile);
                 }
 
                 env = new EnvVars(env);
@@ -1868,16 +1987,18 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
         } catch (IOException e) {
             throw new GitException("Failed to setup credentials", e);
         } finally {
-            deleteTempFile(pass);
             deleteTempFile(key);
             deleteTempFile(ssh);
             deleteTempFile(askpass);
+            deleteTempFile(passphrase);
+            deleteTempFile(usernameFile);
+            deleteTempFile(passwordFile);
         }
     }
 
     private File createSshKeyFile(SSHUserPrivateKey sshUser) throws IOException, InterruptedException {
         File key = createTempFile("ssh", ".key");
-        try (PrintWriter w = new PrintWriter(key, Charset.defaultCharset().toString())) {
+        try (PrintWriter w = new PrintWriter(key, encoding)) {
             List<String> privateKeys = sshUser.getPrivateKeys();
             for (String s : privateKeys) {
                 w.println(s);
@@ -1914,80 +2035,94 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
         }
     }
 
-    /* package protected for testability */
-    String escapeWindowsCharsForUnquotedString(String str) {
-        // Quote special characters for Windows Batch Files
-        // See: http://stackoverflow.com/questions/562038/escaping-double-quotes-in-batch-script
-        // See: http://ss64.com/nt/syntax-esc.html
-        String quoted = str.replace("%", "%%")
-                        .replace("^", "^^")
-                        .replace(" ", "^ ")
-                        .replace("\t", "^\t")
-                        .replace("\\", "^\\")
-                        .replace("&", "^&")
-                        .replace("|", "^|")
-                        .replace("\"", "^\"")
-                        .replace(">", "^>")
-                        .replace("<", "^<");
-        return quoted;
+    /* Escape all double quotes in filename, then surround filename in double quotes.
+     * Only useful to prepare filename for reference from a DOS batch file.
+     */
+    private String windowsArgEncodeFileName(String filename) {
+        if (filename.contains("\"")) {
+            filename = filename.replaceAll("\"", "^\"");
+        }
+        return "\"" + filename + "\"";
     }
 
-    private String quoteUnixCredentials(String str) {
-        // Assumes string will be used inside of single quotes, as it will
-        // only replace "'" substrings.
-        return str.replace("'", "'\\''");
-    }
-
-    private File createWindowsSshAskpass(SSHUserPrivateKey sshUser) throws IOException {
-        File ssh = createTempFile("pass", ".bat");
-        try (PrintWriter w = new PrintWriter(ssh, Charset.defaultCharset().toString())) {
+    private File createWindowsSshAskpass(SSHUserPrivateKey sshUser, @NonNull File passphrase) throws IOException {
+        File ssh = File.createTempFile("pass", ".bat");
+        try (PrintWriter w = new PrintWriter(ssh, encoding)) {
             // avoid echoing command as part of the password
             w.println("@echo off");
-            // no surrounding double quotes on windows echo -- they are echoed too
-            w.println("echo " + escapeWindowsCharsForUnquotedString(Secret.toString(sshUser.getPassphrase())));
+            w.println("type " + windowsArgEncodeFileName(passphrase.getAbsolutePath()));
             w.flush();
         }
         ssh.setExecutable(true, true);
         return ssh;
     }
 
-    private File createUnixSshAskpass(SSHUserPrivateKey sshUser) throws IOException {
+    /* Escape all single quotes in filename, then surround filename in single quotes.
+     * Only useful to prepare filename for reference from a shell script.
+     */
+    private String unixArgEncodeFileName(String filename) {
+        if (filename.contains("'")) {
+            filename = filename.replaceAll("'", "\\'");
+        }
+        return "'" + filename + "'";
+    }
+
+    private File createUnixSshAskpass(SSHUserPrivateKey sshUser, @NonNull File passphrase) throws IOException {
         File ssh = createTempFile("pass", ".sh");
-        try (PrintWriter w = new PrintWriter(ssh, Charset.defaultCharset().toString())) {
+        try (PrintWriter w = new PrintWriter(ssh, encoding)) {
             w.println("#!/bin/sh");
-            w.println("echo '" + quoteUnixCredentials(Secret.toString(sshUser.getPassphrase())) + "'");
+            w.println("cat " + unixArgEncodeFileName(passphrase.getAbsolutePath()));
         }
         ssh.setExecutable(true, true);
         return ssh;
     }
 
-    /* Package protected for testability */
-    File createWindowsBatFile(String userName, String password) throws IOException {
+    private File createWindowsStandardAskpass(StandardUsernamePasswordCredentials creds, File usernameFile, File passwordFile) throws IOException {
         File askpass = createTempFile("pass", ".bat");
-        try (PrintWriter w = new PrintWriter(askpass, Charset.defaultCharset().toString())) {
+        try (PrintWriter w = new PrintWriter(askpass, encoding)) {
             w.println("@set arg=%~1");
-            w.println("@if (%arg:~0,8%)==(Username) echo " + escapeWindowsCharsForUnquotedString(userName));
-            w.println("@if (%arg:~0,8%)==(Password) echo " + escapeWindowsCharsForUnquotedString(password));
+            w.println("@if (%arg:~0,8%)==(Username) type " + windowsArgEncodeFileName(usernameFile.getAbsolutePath()));
+            w.println("@if (%arg:~0,8%)==(Password) type " + windowsArgEncodeFileName(passwordFile.getAbsolutePath()));
         }
         askpass.setExecutable(true, true);
         return askpass;
     }
 
-    private File createWindowsStandardAskpass(StandardUsernamePasswordCredentials creds) throws IOException {
-        return createWindowsBatFile(creds.getUsername(), Secret.toString(creds.getPassword()));
-    }
-
-    private File createUnixStandardAskpass(StandardUsernamePasswordCredentials creds) throws IOException {
+    private File createUnixStandardAskpass(StandardUsernamePasswordCredentials creds, File usernameFile, File passwordFile) throws IOException {
         File askpass = createTempFile("pass", ".sh");
-        try (PrintWriter w = new PrintWriter(askpass, Charset.defaultCharset().toString())) {
+        try (PrintWriter w = new PrintWriter(askpass, encoding)) {
             w.println("#!/bin/sh");
             w.println("case \"$1\" in");
-            w.println("Username*) echo '" + quoteUnixCredentials(creds.getUsername()) + "' ;;");
-            w.println("Password*) echo '" + quoteUnixCredentials(Secret.toString(creds.getPassword())) + "' ;;");
+            w.println("Username*) cat " + unixArgEncodeFileName(usernameFile.getAbsolutePath()) + " ;;");
+            w.println("Password*) cat " + unixArgEncodeFileName(passwordFile.getAbsolutePath()) + " ;;");
             w.println("esac");
         }
         askpass.setExecutable(true, true);
         return askpass;
+    }
+
+    private File createPassphraseFile(SSHUserPrivateKey sshUser) throws IOException {
+        File passphraseFile = createTempFile("phrase", ".txt");
+        try (PrintWriter w = new PrintWriter(passphraseFile, "UTF-8")) {
+            w.println(Secret.toString(sshUser.getPassphrase()));
+        }
+        return passphraseFile;
+    }
+
+    private File createUsernameFile(StandardUsernamePasswordCredentials userPass) throws IOException {
+        File usernameFile = createTempFile("username", ".txt");
+        try (PrintWriter w = new PrintWriter(usernameFile, "UTF-8")) {
+            w.println(userPass.getUsername());
+        }
+        return usernameFile;
+    }
+
+    private File createPasswordFile(StandardUsernamePasswordCredentials userPass) throws IOException {
+        File passwordFile = createTempFile("password", ".txt");
+        try (PrintWriter w = new PrintWriter(passwordFile, "UTF-8")) {
+            w.println(Secret.toString(userPass.getPassword()));
+        }
+        return passwordFile;
     }
 
     private String getPathToExe(String userGitExe) {
@@ -2112,7 +2247,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
         File sshexe = getSSHExecutable();
 
-        try (PrintWriter w = new PrintWriter(ssh, Charset.defaultCharset().toString())) {
+        try (PrintWriter w = new PrintWriter(ssh, encoding)) {
             w.println("@echo off");
             w.println("\"" + sshexe.getAbsolutePath() + "\" -i \"" + key.getAbsolutePath() +"\" -l \"" + user + "\" -o StrictHostKeyChecking=no %* ");
         }
@@ -2122,7 +2257,9 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
     private File createUnixGitSSH(File key, String user) throws IOException {
         File ssh = createTempFile("ssh", ".sh");
-        try (PrintWriter w = new PrintWriter(ssh, Charset.defaultCharset().toString())) {
+        File ssh_copy = new File(ssh.toString() + "-copy");
+        boolean isCopied = false;
+        try (PrintWriter w = new PrintWriter(ssh, encoding)) {
             w.println("#!/bin/sh");
             // ${SSH_ASKPASS} might be ignored if ${DISPLAY} is not set
             w.println("if [ -z \"${DISPLAY}\" ]; then");
@@ -2132,7 +2269,30 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
             w.println("ssh -i \"" + key.getAbsolutePath() + "\" -l \"" + user + "\" -o StrictHostKeyChecking=no \"$@\"");
         }
         ssh.setExecutable(true, true);
-        return ssh;
+        //JENKINS-48258 git client plugin occasionally fails with "text file busy" error
+        //The following creates a copy of the generated file and deletes the original
+        //In case of a failure return the original and delete the copy
+        String fromLocation = ssh.toString();
+        String toLocation = ssh_copy.toString();
+        //Copying ssh file
+        try {
+            new ProcessBuilder("cp", fromLocation, toLocation).start().waitFor();
+            isCopied = true;
+            ssh_copy.setExecutable(true,true);
+            //Deleting original file
+            deleteTempFile(ssh);
+        }
+        catch(InterruptedException ie)
+        {
+            //Delete the copied file in case of failure
+            if(isCopied)
+            {
+                deleteTempFile(ssh_copy);
+            }
+            //Previous operation failed. Return original file
+            return ssh;
+        }
+        return ssh_copy;
     }
 
     private String launchCommandIn(ArgumentListBuilder args, File workDir) throws GitException, InterruptedException {
@@ -2143,10 +2303,18 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     	return launchCommandIn(args, workDir, environment, TIMEOUT);
     }
 
+    @SuppressFBWarnings(value = "NP_NULL_ON_SOME_PATH_FROM_RETURN_VALUE", justification = "earlier readStderr()/readStdout() call prevents null return")
+    private String readProcessIntoString(Proc process, String encoding, boolean useStderr)
+        throws IOException, UnsupportedEncodingException {
+        if (useStderr) {
+            /* process.getStderr reference is the findbugs warning to be suppressed */
+            return IOUtils.toString(process.getStderr(), encoding);
+        }
+        /* process.getStdout reference is the findbugs warning to be suppressed */
+        return IOUtils.toString(process.getStdout(), encoding);
+    }
+
     private String launchCommandIn(ArgumentListBuilder args, File workDir, EnvVars env, Integer timeout) throws GitException, InterruptedException {
-        ByteArrayOutputStream fos = new ByteArrayOutputStream();
-        // JENKINS-13356: capture the output of stderr separately
-        ByteArrayOutputStream err = new ByteArrayOutputStream();
 
         EnvVars freshEnv = new EnvVars(env);
         // If we don't have credentials, but the requested URL requires them,
@@ -2164,26 +2332,53 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 /* GIT_SSH won't call the passphrase prompt script unless detached from controlling terminal */
                 args.prepend("setsid");
             }
-            listener.getLogger().println(" > " + command + (timeout != null ? TIMEOUT_LOG_PREFIX + timeout : ""));
-            Launcher.ProcStarter p = launcher.launch().cmds(args.toCommandArray()).
-                    envs(freshEnv).stdout(fos).stderr(err);
-            if (workDir != null) p.pwd(workDir);
-            int status = p.start().joinWithTimeout(timeout != null ? timeout : TIMEOUT, TimeUnit.MINUTES, listener);
+            int usedTimeout = timeout == null ? TIMEOUT : timeout;
+            listener.getLogger().println(" > " + command + TIMEOUT_LOG_PREFIX + usedTimeout);
 
-            String result = fos.toString(Charset.defaultCharset().toString());
-            if (status != 0) {
-                throw new GitException("Command \""+command+"\" returned status code " + status + ":\nstdout: " + result + "\nstderr: "+ err.toString(Charset.defaultCharset().toString()));
+            Launcher.ProcStarter p = launcher.launch().cmds(args.toCommandArray()).envs(freshEnv);
+
+            if (workDir != null) {
+                p.pwd(workDir);
             }
 
-            return result;
+            int status;
+            String stdout;
+            String stderr;
+
+            if (isZos()) {
+                // Another behavior on z/OS required due to the race condition happening during transcoding of charset in
+                // EBCDIC code page if CopyThread is used on IBM z/OS Java. For unclear reason, if we rely on Proc class consumption
+                // of stdout and stderr with StreamCopyThread, then first several chars of a stream aren't get transcoded.
+                // Also, there is a need to pass a EBCDIC codepage conversion charset into input stream.
+                p.readStdout().readStderr();
+                Proc process = p.start();
+
+                status = process.joinWithTimeout(usedTimeout, TimeUnit.MINUTES, listener);
+
+                stdout = readProcessIntoString(process, encoding, false);
+                stderr = readProcessIntoString(process, encoding, true);
+            } else {
+                // JENKINS-13356: capture stdout and stderr separately
+                ByteArrayOutputStream stdoutStream = new ByteArrayOutputStream();
+                ByteArrayOutputStream stderrStream = new ByteArrayOutputStream();
+
+                p.stdout(stdoutStream).stderr(stderrStream);
+                status = p.start().joinWithTimeout(usedTimeout, TimeUnit.MINUTES, listener);
+
+                stdout = stdoutStream.toString(encoding);
+                stderr = stderrStream.toString(encoding);
+            }
+
+            if (status != 0) {
+                throw new GitException("Command \"" + command + "\" returned status code " + status + ":\nstdout: " + stdout + "\nstderr: "+ stderr);
+            }
+
+            return stdout;
         } catch (GitException | InterruptedException e) {
             throw e;
-        } catch (IOException e) {
-            throw new GitException("Error performing command: " + command, e);
-        } catch (Throwable t) {
-            throw new GitException("Error performing git command", t);
+        } catch (Throwable e) {
+            throw new GitException("Error performing git command: " + command, e);
         }
-
     }
 
     /**
@@ -2193,22 +2388,25 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     public PushCommand push() {
         return new PushCommand() {
-            public URIish remote;
-            public String refspec;
-            public boolean force;
-            public boolean tags;
-            public Integer timeout;
+            private URIish remote;
+            private String refspec;
+            private boolean force;
+            private boolean tags;
+            private Integer timeout;
 
+            @Override
             public PushCommand to(URIish remote) {
                 this.remote = remote;
                 return this;
             }
 
+            @Override
             public PushCommand ref(String refspec) {
                 this.refspec = refspec;
                 return this;
             }
 
+            @Override
             public PushCommand force() {
                 return force(true);
             }
@@ -2219,16 +2417,19 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 return this;
             }
 
+            @Override
             public PushCommand tags(boolean tags) {
                 this.tags = tags;
                 return this;
             }
 
+            @Override
             public PushCommand timeout(Integer timeout) {
                 this.timeout = timeout;
                 return this;
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
                 ArgumentListBuilder args = new ArgumentListBuilder();
                 args.add("push", remote.toPrivateASCIIString());
@@ -2367,39 +2568,45 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     public CheckoutCommand checkout() {
         return new CheckoutCommand() {
 
-            public String ref;
-            public String branch;
-            public boolean deleteBranch;
-            public List<String> sparseCheckoutPaths = Collections.emptyList();
-            public Integer timeout;
-            public String lfsRemote;
-            public StandardCredentials lfsCredentials;
+            private String ref;
+            private String branch;
+            private boolean deleteBranch;
+            private List<String> sparseCheckoutPaths = Collections.emptyList();
+            private Integer timeout;
+            private String lfsRemote;
+            private StandardCredentials lfsCredentials;
 
+            @Override
             public CheckoutCommand ref(String ref) {
                 this.ref = ref;
                 return this;
             }
 
+            @Override
             public CheckoutCommand branch(String branch) {
                 this.branch = branch;
                 return this;
             }
 
+            @Override
             public CheckoutCommand deleteBranchIfExist(boolean deleteBranch) {
                 this.deleteBranch = deleteBranch;
                 return this;
             }
 
+            @Override
             public CheckoutCommand sparseCheckoutPaths(List<String> sparseCheckoutPaths) {
                 this.sparseCheckoutPaths = sparseCheckoutPaths == null ? Collections.<String>emptyList() : sparseCheckoutPaths;
                 return this;
             }
 
+            @Override
             public CheckoutCommand timeout(Integer timeout) {
                 this.timeout = timeout;
                 return this;
             }
 
+            @Override
             public CheckoutCommand lfsRemote(String lfsRemote) {
                 this.lfsRemote = lfsRemote;
                 return this;
@@ -2423,6 +2630,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 throw new InterruptedException(interruptMessage);
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
                 /* File.lastModified() limited by file system time, several
                  * popular Linux file systems only have 1 second granularity.
@@ -2620,12 +2828,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     public RevListCommand revList_() {
         return new RevListCommand() {
-            public boolean all;
-            public boolean nowalk;
-            public boolean firstParent;
-            public String refspec;
-            public List<ObjectId> out;
+            private boolean all;
+            private boolean nowalk;
+            private boolean firstParent;
+            private String refspec;
+            private List<ObjectId> out;
 
+            @Override
             public RevListCommand all() {
                 return all(true);
             }
@@ -2635,6 +2844,8 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 this.all = all;
                 return this;
             }
+
+            @Override
             public RevListCommand nowalk(boolean nowalk) {
                 // --no-walk wasn't introduced until v1.5.3
                 if (isAtLeastVersion(1, 5, 3, 0)) {
@@ -2643,6 +2854,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 return this;
             }
 
+            @Override
             public RevListCommand firstParent() {
                 return firstParent(true);
             }
@@ -2653,16 +2865,19 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
                 return this;
             }
 
+            @Override
             public RevListCommand to(List<ObjectId> revs){
                 this.out = revs;
                 return this;
             }
 
+            @Override
             public RevListCommand reference(String reference){
                 this.refspec = reference;
                 return this;
             }
 
+            @Override
             public void execute() throws GitException, InterruptedException {
                 ArgumentListBuilder args = new ArgumentListBuilder("rev-list");
 
@@ -3169,7 +3384,11 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
     /** inline ${@link hudson.Functions#isWindows()} to prevent a transient remote classloader issue */
     private boolean isWindows() {
-        return File.pathSeparatorChar==';';
+        return File.pathSeparatorChar == ';';
+    }
+
+    private boolean isZos() {
+        return File.pathSeparatorChar == ':' && System.getProperty("os.name").equals("z/OS");
     }
 
     /* Return true if setsid program exists */
