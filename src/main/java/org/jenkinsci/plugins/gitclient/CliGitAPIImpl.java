@@ -311,6 +311,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public GitClient subGit(String subdir) {
         return new CliGitAPIImpl(gitExe, new File(workspace, subdir), listener, environment);
     }
@@ -321,6 +322,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public void init() throws GitException, InterruptedException {
         init_().workspace(workspace.getAbsolutePath()).execute();
     }
@@ -332,6 +334,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public boolean hasGitRepo() throws GitException, InterruptedException {
         if (hasGitRepo(".git")) {
             // Check if this is a valid git repo with --is-inside-work-tree
@@ -367,6 +370,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public List<IndexEntry> getSubmodules( String treeIsh ) throws GitException, InterruptedException {
         List<IndexEntry> submodules = lsTree(treeIsh,true);
 
@@ -446,6 +450,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.FetchCommand} object.
      */
+    @Override
     public FetchCommand fetch_() {
         return new FetchCommand() {
             private URIish url;
@@ -566,11 +571,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void fetch(URIish url, List<RefSpec> refspecs) throws GitException, InterruptedException {
         fetch_().from(url, refspecs).execute();
     }
 
     /** {@inheritDoc} */
+    @Override
     public void fetch(String remoteName, RefSpec... refspec) throws GitException, InterruptedException {
         listener.getLogger().println(
                                      "Fetching upstream changes"
@@ -602,11 +609,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void fetch(String remoteName, RefSpec refspec) throws GitException, InterruptedException {
         fetch(remoteName, new RefSpec[] {refspec});
     }
 
     /** {@inheritDoc} */
+    @Override
     public void reset(boolean hard) throws GitException, InterruptedException {
     	try {
     		validateRevision("HEAD");
@@ -630,6 +639,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.CloneCommand} object.
      */
+    @Override
     public CloneCommand clone_() {
         return new CloneCommand() {
             private String url;
@@ -799,6 +809,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.MergeCommand} object.
      */
+    @Override
     public MergeCommand merge() {
         return new MergeCommand() {
             private ObjectId rev;
@@ -874,7 +885,26 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
                 args.add(fastForwardMode);
                 args.add(rev.name());
-                launchCommand(args);
+
+                /* See JENKINS-45228 */
+                /* Git merge requires authentication in LFS merges, plugin does not authenticate the git merge command */
+                String defaultRemote = null;
+                try {
+                    defaultRemote = getDefaultRemote();
+                } catch (GitException e) {
+                    /* Nothing to do, just keeping defaultRemote = null */
+                }
+
+                if (defaultRemote != null && !defaultRemote.isEmpty()) {
+                    String repoUrl = getRemoteUrl(defaultRemote);
+                    StandardCredentials cred = credentials.get(repoUrl);
+                    if (cred == null) cred = defaultCredentials;
+                    launchCommandWithCredentials(args, workspace, cred, repoUrl);
+                } else {
+                    /* Merge is allowed even if a remote URL is not defined. */
+                    /* If there is no remote URL, there is no need to use credentials in the merge. */
+                    launchCommand(args);
+                }
             }
         };
     }
@@ -884,6 +914,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.RebaseCommand} object.
      */
+    @Override
     public RebaseCommand rebase() {
         return new RebaseCommand() {
             private String upstream;
@@ -914,6 +945,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.InitCommand} object.
      */
+    @Override
     public InitCommand init_() {
         return new InitCommand() {
 
@@ -968,6 +1000,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public void clean(boolean cleanSubmodule) throws GitException, InterruptedException {
         reset(true);
 	String cmd = "-fdx";
@@ -983,11 +1016,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public void clean() throws GitException, InterruptedException {
         this.clean(false);
     }
 
     /** {@inheritDoc} */
+    @Override
     public ObjectId revParse(String revName) throws GitException, InterruptedException {
 
         String arg = sanitize(revName + "^{commit}");
@@ -1052,6 +1087,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public String describe(String commitIsh) throws GitException, InterruptedException {
         String result = launchCommand("describe", "--tags", commitIsh);
         String line = firstLine(result);
@@ -1061,6 +1097,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void prune(RemoteConfig repository) throws GitException, InterruptedException {
         String repoName = repository.getName();
         String repoUrl = getRemoteUrl(repoName);
@@ -1183,11 +1220,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public List<String> showRevision(ObjectId from, ObjectId to) throws GitException, InterruptedException {
         return showRevision(from, to, true);
     }
 
     /** {@inheritDoc} */
+    @Override
     public List<String> showRevision(ObjectId from, ObjectId to, Boolean useRawOutput) throws GitException, InterruptedException {
         ArgumentListBuilder args = new ArgumentListBuilder("log", "--full-history", "--no-abbrev", "--format=raw", "-M", "-m");
         if (useRawOutput) {
@@ -1211,11 +1250,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public void submoduleInit() throws GitException, InterruptedException {
         launchCommand("submodule", "init");
     }
 
     /** {@inheritDoc} */
+    @Override
     public void addSubmodule(String remoteURL, String subdir) throws GitException, InterruptedException {
         launchCommand("submodule", "add", remoteURL, subdir);
     }
@@ -1226,6 +1267,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public void submoduleSync() throws GitException, InterruptedException {
         // Check if git submodule has sync support.
         // Only available in git 1.6.1 and above
@@ -1238,6 +1280,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.SubmoduleUpdateCommand} object.
      */
+    @Override
     public SubmoduleUpdateCommand submoduleUpdate() {
         return new SubmoduleUpdateCommand() {
             private boolean recursive                      = false;
@@ -1439,6 +1482,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * Cleans submodules
      */
+    @Override
     public void submoduleClean(boolean recursive) throws GitException, InterruptedException {
         submoduleReset(true, true);
         ArgumentListBuilder args = new ArgumentListBuilder();
@@ -1456,6 +1500,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * Get submodule URL
      */
+    @Override
     public @CheckForNull String getSubmoduleUrl(String name) throws GitException, InterruptedException {
         String result = launchCommand( "config", "--get", "submodule."+name+".url" );
         return StringUtils.trim(firstLine(result));
@@ -1466,6 +1511,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * Set submodule URL
      */
+    @Override
     public void setSubmoduleUrl(String name, String url) throws GitException, InterruptedException {
         launchCommand( "config", "submodule."+name+".url", url );
     }
@@ -1484,22 +1530,26 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public @CheckForNull String getRemoteUrl(String name) throws GitException, InterruptedException {
         String result = launchCommand( "config", "--get", "remote."+name+".url" );
         return StringUtils.trim(firstLine(result));
     }
 
     /** {@inheritDoc} */
+    @Override
     public void setRemoteUrl(String name, String url) throws GitException, InterruptedException {
         launchCommand( "config", "remote."+name+".url", url );
     }
 
     /** {@inheritDoc} */
+    @Override
     public void addRemoteUrl(String name, String url) throws GitException, InterruptedException {
         launchCommand( "config", "--add", "remote."+name+".url", url );
     }
 
     /** {@inheritDoc} */
+    @Override
     public String getRemoteUrl(String name, String GIT_DIR) throws GitException, InterruptedException {
         final String remoteNameUrl = "remote." + name + ".url";
         String result;
@@ -1516,6 +1566,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void setRemoteUrl(String name, String url, String GIT_DIR ) throws GitException, InterruptedException {
         launchCommand( "--git-dir=" + GIT_DIR,
                        "config", "remote."+name+".url", url );
@@ -1523,6 +1574,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
 
     /** {@inheritDoc} */
+    @Override
     public String getDefaultRemote( String _default_ ) throws GitException, InterruptedException {
         BufferedReader rdr =
             new BufferedReader(
@@ -1561,6 +1613,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public boolean isBareRepository(String GIT_DIR) throws GitException, InterruptedException {
         String ret;
         if ( "".equals(GIT_DIR) )
@@ -1603,6 +1656,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *  -         otherwise:  default is bare
      *  .
      */
+    @Override
     public void fixSubmoduleUrls( String remote,
                                   TaskListener listener ) throws GitException, InterruptedException {
         boolean is_bare = true;
@@ -1687,6 +1741,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * Set up submodule URLs so that they correspond to the remote pertaining to
      * the revision that has been checked out.
      */
+    @Override
     public void setupSubmoduleUrls( Revision rev, TaskListener listener ) throws GitException, InterruptedException {
         String remote = null;
 
@@ -1733,6 +1788,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void tag(String tagName, String comment) throws GitException, InterruptedException {
         tagName = tagName.replace(' ', '_');
         try {
@@ -1743,11 +1799,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void appendNote(String note, String namespace ) throws GitException, InterruptedException {
         createNote(note,namespace,"append");
     }
 
     /** {@inheritDoc} */
+    @Override
     public void addNote(String note, String namespace ) throws GitException, InterruptedException {
         createNote(note,namespace,"add");
     }
@@ -2040,7 +2098,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     private String windowsArgEncodeFileName(String filename) {
         if (filename.contains("\"")) {
-            filename = filename.replaceAll("\"", "^\"");
+            filename = filename.replace("\"", "^\"");
         }
         return "\"" + filename + "\"";
     }
@@ -2051,7 +2109,6 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
             // avoid echoing command as part of the password
             w.println("@echo off");
             w.println("type " + windowsArgEncodeFileName(passphrase.getAbsolutePath()));
-            w.flush();
         }
         ssh.setExecutable(true, true);
         return ssh;
@@ -2062,7 +2119,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      */
     private String unixArgEncodeFileName(String filename) {
         if (filename.contains("'")) {
-            filename = filename.replaceAll("'", "\\'");
+            filename = filename.replace("'", "'\\''");
         }
         return "'" + filename + "'";
     }
@@ -2386,6 +2443,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.PushCommand} object.
      */
+    @Override
     public PushCommand push() {
         return new PushCommand() {
             private URIish remote;
@@ -2514,6 +2572,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public Set<Branch> getBranches() throws GitException, InterruptedException {
         return parseBranches(launchCommand("branch", "-a", "-v", "--no-abbrev"));
     }
@@ -2525,6 +2584,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails
      * @throws java.lang.InterruptedException if interrupted
      */
+    @Override
     public Set<Branch> getRemoteBranches() throws GitException, InterruptedException {
         try (Repository db = getRepository()) {
             Map<String, Ref> refs = db.getAllRefs();
@@ -2565,6 +2625,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.CheckoutCommand} object.
      */
+    @Override
     public CheckoutCommand checkout() {
         return new CheckoutCommand() {
 
@@ -2776,11 +2837,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public boolean tagExists(String tagName) throws GitException, InterruptedException {
         return launchCommand("tag", "-l", tagName).trim().equals(tagName);
     }
 
     /** {@inheritDoc} */
+    @Override
     public void deleteBranch(String name) throws GitException, InterruptedException {
         try {
             launchCommand("branch", "-D", name);
@@ -2792,6 +2855,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
 
     /** {@inheritDoc} */
+    @Override
     public void deleteTag(String tagName) throws GitException, InterruptedException {
         tagName = tagName.replace(' ', '_');
         try {
@@ -2802,6 +2866,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public List<IndexEntry> lsTree(String treeIsh, boolean recursive) throws GitException, InterruptedException {
         List<IndexEntry> entries = new ArrayList<>();
         String result = launchCommand("ls-tree", recursive?"-r":null, treeIsh);
@@ -2826,6 +2891,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link org.jenkinsci.plugins.gitclient.RevListCommand} object.
      */
+    @Override
     public RevListCommand revList_() {
         return new RevListCommand() {
             private boolean all;
@@ -2922,16 +2988,18 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      * @throws java.lang.InterruptedException if interrupted.
      */
+    @Override
     public List<ObjectId> revListAll() throws GitException, InterruptedException {
         List<ObjectId> oidList = new ArrayList<>();
         RevListCommand revListCommand = revList_();
-        revListCommand.all();
+        revListCommand.all(true);
         revListCommand.to(oidList);
         revListCommand.execute();
         return oidList;
     }
 
     /** {@inheritDoc} */
+    @Override
     public List<ObjectId> revList(String ref) throws GitException, InterruptedException {
         List<ObjectId> oidList = new ArrayList<>();
         RevListCommand revListCommand = revList_();
@@ -2942,6 +3010,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public boolean isCommitInRepo(ObjectId commit) throws InterruptedException {
         if (commit == null) {
             return false;
@@ -2964,6 +3033,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void add(String filePattern) throws GitException, InterruptedException {
         try {
             launchCommand("add", filePattern);
@@ -2973,6 +3043,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void branch(String name) throws GitException, InterruptedException {
         try {
             launchCommand("branch", name);
@@ -2982,6 +3053,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void commit(String message) throws GitException, InterruptedException {
         File f = null;
         try {
@@ -2999,6 +3071,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void addCredentials(String url, StandardCredentials credentials) {
         this.credentials.put(url, credentials);
     }
@@ -3006,22 +3079,26 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     /**
      * clearCredentials.
      */
+    @Override
     public void clearCredentials() {
         this.credentials.clear();
     }
 
     /** {@inheritDoc} */
+    @Override
     public void addDefaultCredentials(StandardCredentials credentials) {
         this.defaultCredentials = credentials;
     }
 
     /** {@inheritDoc} */
+    @Override
     public void setAuthor(String name, String email) throws GitException {
         env("GIT_AUTHOR_NAME", name);
         env("GIT_AUTHOR_EMAIL", email);
     }
 
     /** {@inheritDoc} */
+    @Override
     public void setCommitter(String name, String email) throws GitException {
         env("GIT_COMMITTER_NAME", name);
         env("GIT_COMMITTER_EMAIL", email);
@@ -3039,6 +3116,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      * @throws hudson.plugins.git.GitException if underlying git operation fails.
      */
     @NonNull
+    @Override
     public Repository getRepository() throws GitException {
         try {
             return new RepositoryBuilder().setWorkTree(workspace).build();
@@ -3053,11 +3131,13 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
      *
      * @return a {@link hudson.FilePath} object.
      */
+    @Override
     public FilePath getWorkTree() {
         return new FilePath(workspace);
     }
 
     /** {@inheritDoc} */
+    @Override
     public Set<String> getRemoteTagNames(String tagPattern) throws GitException {
         try {
             ArgumentListBuilder args = new ArgumentListBuilder();
@@ -3083,6 +3163,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public Set<String> getTagNames(String tagPattern) throws GitException {
         try {
             ArgumentListBuilder args = new ArgumentListBuilder();
@@ -3104,6 +3185,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public String getTagMessage(String tagName) throws GitException, InterruptedException {
         // 10000 lines of tag message "ought to be enough for anybody"
         String out = launchCommand("tag", "-l", tagName, "-n10000");
@@ -3112,6 +3194,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void ref(String refName) throws GitException, InterruptedException {
 	refName = refName.replace(' ', '_');
 	try {
@@ -3122,6 +3205,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public boolean refExists(String refName) throws GitException, InterruptedException {
 	refName = refName.replace(' ', '_');
 	try {
@@ -3133,6 +3217,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public void deleteRef(String refName) throws GitException, InterruptedException {
 	refName = refName.replace(' ', '_');
 	try {
@@ -3143,6 +3228,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public Set<String> getRefNames(String refPrefix) throws GitException, InterruptedException {
 	if (refPrefix.isEmpty()) {
 	    refPrefix = "refs/";
@@ -3164,6 +3250,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public Map<String, ObjectId> getHeadRev(String url) throws GitException, InterruptedException {
         ArgumentListBuilder args = new ArgumentListBuilder("ls-remote");
         args.add("-h");
@@ -3187,6 +3274,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public ObjectId getHeadRev(String url, String branchSpec) throws GitException, InterruptedException {
         final String branchName = extractBranchNameFromBranchSpec(branchSpec);
         ArgumentListBuilder args = new ArgumentListBuilder("ls-remote");
@@ -3209,6 +3297,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public Map<String, ObjectId> getRemoteReferences(String url, String pattern, boolean headsOnly, boolean tagsOnly)
             throws GitException, InterruptedException {
         ArgumentListBuilder args = new ArgumentListBuilder("ls-remote");
@@ -3290,6 +3379,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
     /** {@inheritDoc} */
     @Deprecated
+    @Override
     public void merge(String refSpec) throws GitException, InterruptedException {
         try {
             launchCommand("merge", refSpec);
@@ -3302,6 +3392,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
     /** {@inheritDoc} */
     @Deprecated
+    @Override
     public void push(RemoteConfig repository, String refspec) throws GitException, InterruptedException {
         ArgumentListBuilder args = new ArgumentListBuilder();
         URIish uri = repository.getURIs().get(0);
@@ -3323,6 +3414,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
     /** {@inheritDoc} */
     @Deprecated
+    @Override
     public List<Branch> getBranchesContaining(String revspec) throws GitException,
             InterruptedException {
         // For backward compatibility we do query remote branches here
@@ -3330,6 +3422,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
     }
 
     /** {@inheritDoc} */
+    @Override
     public List<Branch> getBranchesContaining(String revspec, boolean allBranches)
             throws GitException, InterruptedException {
         final String commandOutput;
@@ -3343,6 +3436,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
     /** {@inheritDoc} */
     @Deprecated
+    @Override
     public ObjectId mergeBase(ObjectId id1, ObjectId id2) throws InterruptedException {
         try {
             String result;
@@ -3369,6 +3463,7 @@ public class CliGitAPIImpl extends LegacyCompatibleGitAPIImpl {
 
     /** {@inheritDoc} */
     @Deprecated
+    @Override
     public String getAllLogEntries(String branch) throws InterruptedException {
         // BROKEN: --all and branch are conflicting.
         return launchCommand("log", "--all", "--pretty=format:'%H#%ct'", branch);
